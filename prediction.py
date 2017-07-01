@@ -1,9 +1,9 @@
 import json
+import os
 import re
-
-import logging
 from datetime import datetime
 
+import logging
 import sklearn
 from graphviz import Source
 from sklearn.feature_extraction import DictVectorizer
@@ -11,13 +11,18 @@ from sklearn.tree import DecisionTreeRegressor
 
 
 def main():
-    with open('cars.json') as file:
-        json_string = file.read()
-    data = json.loads(json_string)
+    cars = []
+    directory = os.getcwd() + '/cars'
+    file_list = os.listdir(directory)
+    for filename in file_list:
+        with open(directory + '/' + filename) as file:
+            json_string = file.read()
+        car = json.loads(json_string)
+        cars.append(car)
 
     X = []
     y = []
-    for car in data:
+    for car in cars:
         row = {}
 
         # mileage
@@ -42,6 +47,27 @@ def main():
 
             row['time_to_hu_in_months'] = time_to_hu
 
+        # power
+        power_in_ps = -1
+        if 'power' in car['mobile']['technical']:
+            power_raw = car['mobile']['technical']['power']
+            power_in_ps = int(re.findall(r'\d+', power_raw)[1])
+        else:
+            logging.warning('no power found')
+        row['power_ps'] = power_in_ps
+
+        # previous owners
+        if 'numberOfPreviousOwners' in car['mobile']['technical']:
+            row['owners'] = int(car['mobile']['technical']['numberOfPreviousOwners'])
+
+        # cubic
+        if 'cubicCapacity' in car['mobile']['technical']:
+            cubic_capacity_raw = car['mobile']['technical']['cubicCapacity'].replace('.', '')
+            cubic_capacity = int(re.findall(r'\d+', cubic_capacity_raw)[0])
+            row['cubic_capacity'] = cubic_capacity
+        else:
+            logging.warning('no cubic capacity found')
+
         # inlining features
         if car['mobile']['features'] is not None:
             for feature in car['mobile']['features']:
@@ -50,7 +76,8 @@ def main():
             row['feature_none'] = True
 
         # tech details as strings
-        row.update(car['mobile']['technical'])
+        excluded_keys = ['mileage', 'firstRegistration', 'hu', 'power', 'cubicCapacity', 'numberOfPreviousOwners']
+        row.update({k: v for k, v in car['mobile']['technical'].items() if k not in excluded_keys})
 
         X.append(row)
 
@@ -65,20 +92,24 @@ def main():
     regr = DecisionTreeRegressor(min_samples_leaf=50)
     regr.fit(X, y)
 
-    with open("iris.dot", 'w') as f:
-        sklearn.tree.export_graphviz(regr, out_file=f, feature_names=vec.get_feature_names())
+    generate_tree_visualization(regr, vec)
 
-    with open("iris.dot", 'r') as f:
-        src = Source(f.read())
-        src.render('iris.gv', view=True)
-
-    for i in range(len(data)):
+    for i in range(len(cars)):
         price_actual = y[i]
         price_inferred = int(regr.predict(X[i]))
 
         differece = price_actual - price_inferred
         is_cheap = differece < 0
-        print(price_actual, price_inferred, is_cheap)
+        print(price_actual, price_inferred, differece, is_cheap)
+
+
+def generate_tree_visualization(regr, vec):
+    with open("iris.dot", 'w') as f:
+        sklearn.tree.export_graphviz(regr, out_file=f, feature_names=vec.get_feature_names())
+    with open("iris.dot", 'r') as f:
+        src = Source(f.read())
+        src.render('iris.gv', view=True)
+
 
 if __name__ == '__main__':
     main()
