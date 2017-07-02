@@ -1,10 +1,10 @@
 import json
-import random
+import logging
+import os
 import urllib
 from datetime import datetime
 from time import sleep
 
-import logging
 import requests
 from bs4 import BeautifulSoup
 
@@ -20,15 +20,14 @@ def perform_search():
     cars_data = []
 
     for page in range(1, 250):
-        # damageUnrepaired=NO_DAMAGE_UNREPAIRED&isSearchRequest=true&makeModelVariant1.makeId=3500&makeModelVariant1.modelGroupId=20&makeModelVariant1.modelId=73%2C2%2C3%2C4%2C59%2C61%2C5%2C58%2C87&pageNumber=51&scopeId=C&sortOption.sortBy=creationTime&sortOption.sortOrder=DESCENDING
         search_url = 'https://suchen.mobile.de/fahrzeuge/search.html'
         parameters = {
             'ambitCountry': 'DE',
             'damageUnrepaired': 'NO_DAMAGE_UNREPAIRED',
             'isSearchRequest': 'true',
             'makeModelVariant1.makeId': 3500,  # bmw
-            'makeModelVariant1.modelGroupId': 20,  # 1er
-            'makeModelVariant1.modelId': '73%2C2%2C3%2C4%2C59%2C61%2C5%2C58%2C87',
+            'makeModelVariant1.modelGroupId': 20,  # 1 series
+            'makeModelVariant1.modelId': '73%2C2%2C3%2C4%2C59%2C61%2C5%2C58%2C87',  # combination of models?
             'scopeId': 'C',
             'usage': 'USED',
             'sortOption.sortBy': 'creationTime',
@@ -50,17 +49,27 @@ def perform_search():
         if len(car_results) == 0:
             return cars_data
 
-        sleep(5)
+        sleep(3)
         for car_result in car_results:
             car_link = car_result.a
             if car_link.has_attr('data-ad-id'):
                 ad_id = int(car_result.a['data-ad-id'])
-                car_url = 'https://suchen.mobile.de/fahrzeuge/details.html?id=%d' % ad_id
 
-                sleep(1)
-                print(car_url)
+                cache_path = get_cache_path_for_ad_id(ad_id)
+                if os.path.isfile(cache_path):
+                    # read from file
+                    with open(cache_path, 'r') as file:
+                        content = file.read()
+                    car_data = json.loads(content)
+                else:
+                    # scrape
+                    car_url = 'https://suchen.mobile.de/fahrzeuge/details.html?id=%d' % ad_id
 
-                car_data = crawl_car(car_url)
+                    sleep(1)
+                    print(car_url)
+
+                    car_data = crawl_car(car_url)
+
                 cars_data.append(car_data)
             else:
                 logging.warning('no ad-id: %s' % car_result)
@@ -78,11 +87,15 @@ def crawl_car(url):
     car = extract_data_from_car_page(html)
     car['url'] = url
 
-    filename = 'cars/%d.json' % car['mobile']['ad_id']
+    filename = get_cache_path_for_ad_id(car['mobile']['ad_id'])
     with open(filename, 'w') as file:
         file.write(json.dumps(car, ensure_ascii=False, indent=4))
 
     return car
+
+
+def get_cache_path_for_ad_id(ad_id):
+    return 'cars/%d.json' % ad_id
 
 
 def extract_data_from_car_page(html):
