@@ -1,13 +1,14 @@
 import json
+import logging
 import os
 import re
 from datetime import datetime
 
-import logging
 import sklearn
 from graphviz import Source
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.tree import DecisionTreeRegressor
+from sklearn.tree.tree import BaseDecisionTree
 
 
 def main():
@@ -33,15 +34,18 @@ def main():
     vec = DictVectorizer()
     X = vec.fit_transform(X)
 
-    regr = DecisionTreeRegressor(min_samples_leaf=50)
+    regr = DecisionTreeRegressor(min_samples_leaf=25, criterion='mae')
     regr.fit(X, y)
 
-    generate_tree_visualization(regr, vec)
+    if isinstance(regr, BaseDecisionTree):
+        generate_tree_visualization(regr, vec)
 
     predictions = generate_predictions(cars, regr, vec)
-
     for prediction in sorted(predictions, key=lambda p: p['price']['difference']):
-        print(prediction['price']['difference'], prediction['car']['url'])
+        print(prediction['car']['url'])
+        print('listed with:  %d' % prediction['price']['actual'])
+        print('worth around: %d' % prediction['price']['inferred'])
+        print('difference:   %d' % prediction['price']['difference'])
 
 
 def generate_predictions(cars, regr, vec):
@@ -52,16 +56,17 @@ def generate_predictions(cars, regr, vec):
         price_actual = extract_price(car)
 
         car_row = car_to_row(car)
-        price_inferred = int(regr.predict(vec.transform(car_row)))
+        row_transformation = vec.transform(car_row)
+        price_inferred = int(regr.predict(row_transformation))
 
-        differece = price_actual - price_inferred
-        is_cheap = differece < 0
+        difference = price_actual - price_inferred
+        is_cheap = difference < 0
 
         prediction = {
             'price': {
                 'actual': price_actual,
                 'inferred': price_inferred,
-                'difference': differece,
+                'difference': difference,
                 'is_cheap': is_cheap,
             },
             'car': car,
@@ -120,8 +125,6 @@ def car_to_row(car):
         cubic_capacity_raw = car['mobile']['web']['technical']['cubicCapacity'].replace('.', '')
         cubic_capacity = int(re.findall(r'\d+', cubic_capacity_raw)[0])
         row['cubic_capacity'] = cubic_capacity
-    else:
-        logging.warning('no cubic capacity found')
 
     # inlining features
     if car['mobile']['web']['features'] is not None:
@@ -142,11 +145,14 @@ def car_to_row(car):
 
 
 def generate_tree_visualization(regr, vec):
-    with open("iris.dot", 'w') as f:
+    dot_filename = "tree.dot"
+    gv_filename = 'tree.gv'
+
+    with open(dot_filename, 'w') as f:
         sklearn.tree.export_graphviz(regr, out_file=f, feature_names=vec.get_feature_names())
-    with open("iris.dot", 'r') as f:
+    with open(dot_filename, 'r') as f:
         src = Source(f.read())
-        src.render('iris.gv', view=True)
+        src.render(gv_filename, view=True)
 
 
 if __name__ == '__main__':

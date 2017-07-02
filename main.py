@@ -38,18 +38,23 @@ def main():
         'sortOption.sortBy': 'creationTime',
         'sortOption.sortOrder': 'DESCENDING',
         'maxMileage': 200000,
-        'maxPrice': 10000,
+        'maxPrice': 25000,
     }
 
     while True:
-        scrape_search(parameters_premium_cars)
-        sleep(300)
+        scrape_search(parameters=parameters_premium_cars, pages=30)
+
+        print('going to sleep')
+        sleep(60 * 5)
 
 
-def scrape_search(parameters):
+def scrape_search(parameters, pages=50):
+    if pages > 50:
+        logging.warning('pages bigger than 50 do not yield new results')
+
     cars_data = []
 
-    for page in range(1, 50):
+    for page in range(1, 1 + pages):
         search_url = 'https://suchen.mobile.de/fahrzeuge/search.html'
         parameters['pageNumber'] = page
         url = search_url + '?' + urllib.parse.urlencode(parameters)
