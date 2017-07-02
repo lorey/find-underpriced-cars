@@ -10,32 +10,48 @@ from bs4 import BeautifulSoup
 
 
 def main():
-    cars_data = perform_search()
+    parameters_bmw_1_series = {
+        'ambitCountry': 'DE',
+        'damageUnrepaired': 'NO_DAMAGE_UNREPAIRED',
+        'isSearchRequest': 'true',
+        'makeModelVariant1.makeId': 3500,  # bmw
+        'makeModelVariant1.modelGroupId': 20,  # 1 series
+        'makeModelVariant1.modelId': '73%2C2%2C3%2C4%2C59%2C61%2C5%2C58%2C87',  # combination of models?
+        'scopeId': 'C',
+        'usage': 'USED',
+        'sortOption.sortBy': 'creationTime',
+        'sortOption.sortOrder': 'DESCENDING',
+        'maxPrice': 10000,
+    }
 
-    with open('cars.json', 'w') as file:
-        file.write(json.dumps(cars_data, indent=2, ensure_ascii=False))
+    parameters_premium_cars = {
+        'adLimitation': 'ONLY_FSBO_ADS',  # private
+        'climatisation': 'MANUAL_OR_AUTOMATIC_CLIMATISATION',
+        'ambitCountry': 'DE',
+        'damageUnrepaired': 'NO_DAMAGE_UNREPAIRED',
+        'isSearchRequest': 'true',
+        'makeModelVariant1.makeId': 3500,  # bmw
+        'makeModelVariant2.makeId': 1900,  # audi?
+        'makeModelVariant3.makeId': 17200,  # mercedes?
+        'scopeId': 'C',
+        'usage': 'USED',
+        'sortOption.sortBy': 'creationTime',
+        'sortOption.sortOrder': 'DESCENDING',
+        'maxMileage': 200000,
+        'maxPrice': 10000,
+    }
+
+    while True:
+        scrape_search(parameters_premium_cars)
+        sleep(300)
 
 
-def perform_search():
+def scrape_search(parameters):
     cars_data = []
 
-    for page in range(1, 250):
+    for page in range(1, 50):
         search_url = 'https://suchen.mobile.de/fahrzeuge/search.html'
-        parameters = {
-            'ambitCountry': 'DE',
-            'damageUnrepaired': 'NO_DAMAGE_UNREPAIRED',
-            'isSearchRequest': 'true',
-            'makeModelVariant1.makeId': 3500,  # bmw
-            'makeModelVariant1.modelGroupId': 20,  # 1 series
-            'makeModelVariant1.modelId': '73%2C2%2C3%2C4%2C59%2C61%2C5%2C58%2C87',  # combination of models?
-            'scopeId': 'C',
-            'usage': 'USED',
-            'sortOption.sortBy': 'creationTime',
-            'sortOption.sortOrder': 'DESCENDING',
-            'pageNumber': page,
-            'maxPrice': 10000,
-        }
-
+        parameters['pageNumber'] = page
         url = search_url + '?' + urllib.parse.urlencode(parameters)
         print(url)
 
@@ -57,48 +73,76 @@ def perform_search():
 
                 cache_path = get_cache_path_for_ad_id(ad_id)
                 if os.path.isfile(cache_path):
-                    # read from file
+                    # read from cache
                     with open(cache_path, 'r') as file:
                         content = file.read()
                     car_data = json.loads(content)
                 else:
-                    # scrape
-                    car_url = 'https://suchen.mobile.de/fahrzeuge/details.html?id=%d' % ad_id
+                    # scrape and store
+                    car_data = scrape_and_store_ad(ad_id)
 
-                    sleep(1)
-                    print(car_url)
-
-                    car_data = crawl_car(car_url)
-
-                cars_data.append(car_data)
+                if car_data is not None:
+                    cars_data.append(car_data)
             else:
                 logging.warning('no ad-id: %s' % car_result)
 
     return cars_data
 
 
-def crawl_car(url):
+def scrape_and_store_ad(ad_id):
+    ad_url = 'https://suchen.mobile.de/fahrzeuge/details.html?id=%d' % ad_id
+
+    print(ad_url)
+    sleep(1)
+
+    car_data = scrape_ad(ad_url)
+    if car_data is None:
+        return None
+
+    # write to cache
+    filename = get_cache_path_for_ad_id(car_data['mobile']['ad_id'])
+    with open(filename, 'w') as file:
+        file.write(json.dumps(car_data, ensure_ascii=False, indent=2, sort_keys=True))
+
+    return car_data
+
+
+def scrape_ad(url):
     # todo save html
     # todo save pictures
 
     response = requests.get(url)
+    if response.status_code != 200:
+        return None
+
     html = response.content.decode('utf-8')
 
-    car = extract_data_from_car_page(html)
+    # web data
+    car = scrape_data_from_ad_page(html)
+
+    # dart data
+    car['mobile']['dart'] = extract_dart_data(html)
+
+    # add url
     car['url'] = url
 
-    filename = get_cache_path_for_ad_id(car['mobile']['ad_id'])
-    with open(filename, 'w') as file:
-        file.write(json.dumps(car, ensure_ascii=False, indent=4))
-
     return car
+
+
+def extract_dart_data(html):
+    search_start = 'mobile.dart.setAdData('
+    start_index = html.find(search_start) + len(search_start)
+    end_index = html.find(');', start_index)
+
+    json_data = json.loads(html[start_index:end_index])
+    return json_data
 
 
 def get_cache_path_for_ad_id(ad_id):
     return 'cars/%d.json' % ad_id
 
 
-def extract_data_from_car_page(html):
+def scrape_data_from_ad_page(html):
     soup = BeautifulSoup(html, 'html.parser')
 
     # generic
@@ -154,12 +198,14 @@ def extract_data_from_car_page(html):
         },
         'mobile': {
             'ad_id': ad_id,
-            'title': title,
-            'price': price,
-            'technical': technical_data,
-            'features': features,
-            'description': description,
-            'seller': seller,
+            'web': {
+                'title': title,
+                'price': price,
+                'technical': technical_data,
+                'features': features,
+                'description': description,
+                'seller': seller,
+            }
         },
     }
     return car
