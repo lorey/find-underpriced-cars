@@ -3,6 +3,7 @@ import logging
 import os
 import re
 from datetime import datetime
+from time import sleep
 
 import sklearn
 from graphviz import Source
@@ -12,15 +13,23 @@ from sklearn.tree.tree import BaseDecisionTree
 
 
 def main():
-    cars = []
-    directory = os.getcwd() + '/cars'
-    file_list = os.listdir(directory)
-    for filename in file_list:
-        with open(directory + '/' + filename) as file:
-            json_string = file.read()
-        car = json.loads(json_string)
-        cars.append(car)
+    while True:
+        predictions = train_and_predict()
+        sleep(300)
+    # print_best_predictions(predictions)
 
+
+def print_best_predictions(predictions):
+    best_predictions = sorted(predictions, key=lambda p: p['price']['difference'])[0:20]
+    for prediction in best_predictions:
+        print(prediction['car']['url'])
+        print('listed with:  %d' % prediction['price']['actual'])
+        print('worth around: %d' % prediction['price']['inferred'])
+        print('difference:   %d' % prediction['price']['difference'])
+
+
+def train_and_predict():
+    cars = load_cars()
     X = []
     y = []
     for car in cars:
@@ -30,25 +39,38 @@ def main():
         # price
         price = extract_price(car)
         y.append(price)
+    vectorizer = DictVectorizer()
+    X = vectorizer.fit_transform(X)
 
-    vec = DictVectorizer()
-    X = vec.fit_transform(X)
+    # scaler = StandardScaler()
+    # X = scaler.fit_transform(X.todense())
 
-    regr = DecisionTreeRegressor(min_samples_leaf=25, criterion='mae')
+    # regr = SVR(kernel='linear')  # 0.80
+    regr = DecisionTreeRegressor(criterion='mae', min_samples_leaf=50, min_impurity_split=1000)
     regr.fit(X, y)
+    print("Coefficient of determination on training set:", regr.score(X, y))
 
     if isinstance(regr, BaseDecisionTree):
-        generate_tree_visualization(regr, vec)
+        generate_tree_visualization(regr, vectorizer)
 
-    predictions = generate_predictions(cars, regr, vec)
-    for prediction in sorted(predictions, key=lambda p: p['price']['difference']):
-        print(prediction['car']['url'])
-        print('listed with:  %d' % prediction['price']['actual'])
-        print('worth around: %d' % prediction['price']['inferred'])
-        print('difference:   %d' % prediction['price']['difference'])
+    predictions = generate_predictions(cars, regr, vectorizer)
+
+    return predictions
 
 
-def generate_predictions(cars, regr, vec):
+def load_cars():
+    cars = []
+    directory = os.getcwd() + '/cars'
+    file_list = os.listdir(directory)
+    for filename in file_list:
+        with open(directory + '/' + filename) as file:
+            json_string = file.read()
+        car = json.loads(json_string)
+        cars.append(car)
+    return cars
+
+
+def generate_predictions(cars, regr, vectorizer):
     predictions = []
     for i in range(len(cars)):
         car = cars[i]
@@ -56,7 +78,7 @@ def generate_predictions(cars, regr, vec):
         price_actual = extract_price(car)
 
         car_row = car_to_row(car)
-        row_transformation = vec.transform(car_row)
+        row_transformation = vectorizer.transform(car_row)
         price_inferred = int(regr.predict(row_transformation))
 
         difference = price_actual - price_inferred
@@ -112,8 +134,6 @@ def car_to_row(car):
     if 'power' in car['mobile']['web']['technical']:
         power_raw = car['mobile']['web']['technical']['power']
         power_in_ps = int(re.findall(r'\d+', power_raw)[1])
-    else:
-        logging.warning('no power found')
     row['power_ps'] = power_in_ps
 
     # previous owners
@@ -152,7 +172,7 @@ def generate_tree_visualization(regr, vec):
         sklearn.tree.export_graphviz(regr, out_file=f, feature_names=vec.get_feature_names())
     with open(dot_filename, 'r') as f:
         src = Source(f.read())
-        src.render(gv_filename, view=True)
+        src.render(gv_filename)
 
 
 if __name__ == '__main__':

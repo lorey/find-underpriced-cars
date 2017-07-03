@@ -24,7 +24,7 @@ def main():
         'maxPrice': 10000,
     }
 
-    parameters_premium_cars = {
+    used_private_premium_cars = {
         'adLimitation': 'ONLY_FSBO_ADS',  # private
         'climatisation': 'MANUAL_OR_AUTOMATIC_CLIMATISATION',
         'ambitCountry': 'DE',
@@ -41,11 +41,24 @@ def main():
         'maxPrice': 25000,
     }
 
-    while True:
-        scrape_search(parameters=parameters_premium_cars, pages=30)
+    used_cars = {
+        'ambitCountry': 'DE',
+        'damageUnrepaired': 'NO_DAMAGE_UNREPAIRED',
+        'isSearchRequest': 'true',
+        'scopeId': 'C',
+        'usage': 'USED',
+        'sortOption.sortBy': 'creationTime',
+        'sortOption.sortOrder': 'DESCENDING',
+        'maxMileage': 200000,
+        'maxPrice': 25000,
+    }
 
-        print('going to sleep')
-        sleep(60 * 5)
+    while True:
+        scrape_search(parameters=used_cars)
+
+        # fuck sleep
+        # print('going to sleep')
+        # sleep(60 * 5)
 
 
 def scrape_search(parameters, pages=50):
@@ -199,7 +212,9 @@ def scrape_data_from_ad_page(html):
 
     car = {
         'crawler': {
-            'seen_at': str(datetime.now()),
+            'created_at': str(datetime.now()),
+            'updated_at': str(datetime.now()),
+            'last_seen_at': str(datetime.now()),
         },
         'mobile': {
             'ad_id': ad_id,
