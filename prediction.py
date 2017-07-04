@@ -6,26 +6,40 @@ from time import sleep
 
 import numpy
 import pandas
+import requests
 import sklearn
 from graphviz import Source
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_selection import SelectKBest
+from sklearn.feature_selection import mutual_info_regression
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.tree.tree import BaseDecisionTree
+
+SECONDS_TO_YEARS_FACTOR = 1 / (60 * 60 * 24 * 365)
 
 
 def main():
     while True:
         predictions = train_and_predict()
+        # print_best_predictions(predictions, n=100)
         sleep(300)
-        # print_best_predictions(predictions)
 
 
-def print_best_predictions(predictions):
-    best_predictions = sorted(predictions, key=lambda p: p['price']['difference'])[0:50]
+def print_best_predictions(predictions, n=100, ensure_online=False):
+    best_predictions = sorted(predictions, key=lambda p: p['price']['difference'])
+    shown = 0
     for prediction in best_predictions:
-        print('https://suchen.mobile.de/fahrzeuge/details.html?id=%s' % prediction['car_id'])
-        print('listed with:  %d' % prediction['price']['actual'])
-        print('worth around: %d' % prediction['price']['inferred'])
-        print('difference:   %d' % prediction['price']['difference'])
+        sleep(0.5)
+        url = 'https://suchen.mobile.de/fahrzeuge/details.html?id=%s' % prediction['car_id']
+        if not ensure_online or requests.get(url).status_code == 200:
+            shown += 1
+            print(url)
+            print('listed with:  %d' % prediction['price']['actual'])
+            print('worth around: %d' % prediction['price']['inferred'])
+            print('difference:   %d' % prediction['price']['difference'])
+
+        if shown >= n:
+            return
 
 
 def train_and_predict():
@@ -86,6 +100,10 @@ def train_and_predict():
             values.append(car['mobile']['dart'][key_from_dart])
     # todo get_dummies and append
 
+    # money_words = get_money_words(cars, df)
+    # df = pandas.concat([df, money_words], axis=1)
+
+    # key by id
     df = df.set_index('id')
 
     columns_training = df.columns[1:]
@@ -110,6 +128,25 @@ def train_and_predict():
     predictions = generate_predictions(df, regr, columns_training)
 
     return predictions
+
+
+def get_money_words(cars, df, top=10):
+    texts = []
+    for car in cars:
+        if car['mobile']['web']['description'] is not None:
+            texts.append(car['mobile']['web']['description'].get('text', ''))
+        else:
+            texts.append('')
+
+    tfidf_vectorizer = TfidfVectorizer(ngram_range=(2, 5), max_features=top*10, max_df=0.75)
+    tfidfs = tfidf_vectorizer.fit_transform(texts)
+
+    k_best = SelectKBest(mutual_info_regression, k=top)
+    X_new = k_best.fit_transform(tfidfs, df.price)
+
+    k_best_feature_indices = k_best.get_support(True).tolist()
+    k_best_column_names = ['contains=' + tfidf_vectorizer.get_feature_names()[i] for i in k_best_feature_indices]
+    return pandas.DataFrame(X_new.todense(), columns=k_best_column_names)
 
 
 def extract_interior_type(desc):
@@ -173,7 +210,7 @@ def extract_number_from_string(string):
 def get_car_age_in_years(car):
     first_registration_raw = car['mobile']['web']['technical']['firstRegistration']
     first_registration = datetime.strptime(first_registration_raw, '%m/%Y')
-    return (datetime.now() - first_registration).total_seconds() / (60 * 60 * 24 * 365)
+    return (datetime.now() - first_registration).total_seconds() * SECONDS_TO_YEARS_FACTOR
 
 
 def get_time_to_hu(car):
@@ -181,10 +218,10 @@ def get_time_to_hu(car):
     if 'hu' in car['mobile']['web']['technical']:
         hu_raw = car['mobile']['web']['technical']['hu']
         if hu_raw == 'Neu':
-            time_to_hu = 0.0
+            time_to_hu = 2.0
         else:
             hu = datetime.strptime(hu_raw, '%m/%Y')
-            time_to_hu = (hu - datetime.now()).total_seconds() / (60 * 60 * 24 * 12)
+            time_to_hu = (hu - datetime.now()).total_seconds() * SECONDS_TO_YEARS_FACTOR
 
     return time_to_hu
 
@@ -217,7 +254,7 @@ def generate_tree_visualization(regr, feature_names):
     gv_filename = 'tree.gv'
 
     with open(dot_filename, 'w') as f:
-        sklearn.tree.export_graphviz(regr, out_file=f, feature_names=feature_names)
+        sklearn.tree.export_graphviz(regr, out_file=f, feature_names=feature_names, filled=True, impurity=True, rotate=True)
     with open(dot_filename, 'r') as f:
         src = Source(f.read())
         src.render(gv_filename)
