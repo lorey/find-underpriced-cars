@@ -8,53 +8,53 @@ from time import sleep
 import requests
 from bs4 import BeautifulSoup
 
+USED_CARS = {
+    'ambitCountry': 'DE',
+    'damageUnrepaired': 'NO_DAMAGE_UNREPAIRED',
+    'isSearchRequest': 'true',
+    'scopeId': 'C',
+     'usage': 'USED',
+    'sortOption.sortBy': 'creationTime',
+    'sortOption.sortOrder': 'DESCENDING',
+    'maxMileage': 200000,
+     'maxPrice': 25000,
+}
+
+USED_PRIVATE_PREMIUM_CARS = {
+    'adLimitation': 'ONLY_FSBO_ADS',  # private
+    'climatisation': 'MANUAL_OR_AUTOMATIC_CLIMATISATION',
+    'ambitCountry': 'DE',
+    'damageUnrepaired': 'NO_DAMAGE_UNREPAIRED',
+    'isSearchRequest': 'true',
+    'makeModelVariant1.makeId': 3500,  # bmw
+    'makeModelVariant2.makeId': 1900,  # audi?
+    'makeModelVariant3.makeId': 17200,  # mercedes?
+    'scopeId': 'C',
+    'usage': 'USED',
+    'sortOption.sortBy': 'creationTime',
+    'sortOption.sortOrder': 'DESCENDING',
+    'maxMileage': 200000,
+    'maxPrice': 25000,
+}
+
+PARAMETERS_BMW_ONE_SERIES = {
+    'ambitCountry': 'DE',
+    'damageUnrepaired': 'NO_DAMAGE_UNREPAIRED',
+    'isSearchRequest': 'true',
+    'makeModelVariant1.makeId': 3500,  # bmw
+    'makeModelVariant1.modelGroupId': 20,  # 1 series
+    'makeModelVariant1.modelId': '73%2C2%2C3%2C4%2C59%2C61%2C5%2C58%2C87',  # combination of models?
+    'scopeId': 'C',
+    'usage': 'USED',
+    'sortOption.sortBy': 'creationTime',
+    'sortOption.sortOrder': 'DESCENDING',
+    'maxPrice': 10000,
+}
+
 
 def run():
-    parameters_bmw_1_series = {
-        'ambitCountry': 'DE',
-        'damageUnrepaired': 'NO_DAMAGE_UNREPAIRED',
-        'isSearchRequest': 'true',
-        'makeModelVariant1.makeId': 3500,  # bmw
-        'makeModelVariant1.modelGroupId': 20,  # 1 series
-        'makeModelVariant1.modelId': '73%2C2%2C3%2C4%2C59%2C61%2C5%2C58%2C87',  # combination of models?
-        'scopeId': 'C',
-        'usage': 'USED',
-        'sortOption.sortBy': 'creationTime',
-        'sortOption.sortOrder': 'DESCENDING',
-        'maxPrice': 10000,
-    }
-
-    used_private_premium_cars = {
-        'adLimitation': 'ONLY_FSBO_ADS',  # private
-        'climatisation': 'MANUAL_OR_AUTOMATIC_CLIMATISATION',
-        'ambitCountry': 'DE',
-        'damageUnrepaired': 'NO_DAMAGE_UNREPAIRED',
-        'isSearchRequest': 'true',
-        'makeModelVariant1.makeId': 3500,  # bmw
-        'makeModelVariant2.makeId': 1900,  # audi?
-        'makeModelVariant3.makeId': 17200,  # mercedes?
-        'scopeId': 'C',
-        'usage': 'USED',
-        'sortOption.sortBy': 'creationTime',
-        'sortOption.sortOrder': 'DESCENDING',
-        'maxMileage': 200000,
-        'maxPrice': 25000,
-    }
-
-    used_cars = {
-        'ambitCountry': 'DE',
-        'damageUnrepaired': 'NO_DAMAGE_UNREPAIRED',
-        'isSearchRequest': 'true',
-        'scopeId': 'C',
-        'usage': 'USED',
-        'sortOption.sortBy': 'creationTime',
-        'sortOption.sortOrder': 'DESCENDING',
-        'maxMileage': 200000,
-        'maxPrice': 25000,
-    }
-
     while True:
-        scrape_search(parameters=used_cars)
+        scrape_search(parameters=USED_CARS)
 
         # fuck sleep
         # print('going to sleep')
