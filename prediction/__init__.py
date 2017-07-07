@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 from time import sleep
 
+import logging
 import numpy
 import pandas
 import requests
@@ -20,9 +21,9 @@ SECONDS_TO_YEARS_FACTOR = 1 / (60 * 60 * 24 * 365)
 
 def main():
     while True:
-        cars = load_cars()
+        cars = load_cars()[:10000]
         predictions = train_and_predict(cars, cars)
-        # print_best_predictions(predictions, n=100)
+        print_best_predictions(predictions, n=100, ensure_online=True)
         sleep(300)
 
 
@@ -46,8 +47,30 @@ def print_best_predictions(predictions, n=100, ensure_online=False):
 def train_and_predict(cars_training: list, cars_prediction: list):
     cars = cars_training + cars_prediction
     df = preprocess(cars)
-    df_training = df[0:len(cars_training)]
-    df_prediction = df[len(cars_training):]
+    print(df)
+
+    df_clean = pandas.DataFrame()
+    for column in list(df.columns.values):
+        print(column)
+        if df[column].dtype not in [numpy.float64, numpy.int]:
+            # create dummies and concat
+            dummies = pandas.get_dummies(df[column], prefix=column, dummy_na=True)
+            df_clean = pandas.concat([df_clean, dummies], axis=1)
+            print('  getting dummies (%d columns)' % len(list(dummies.columns)))
+        else:
+            print('  appending')
+            # copy column
+            if df[column].isnull().any():
+                # nan_replacement = nan_replacements[column]
+                df_clean[column] = df[column].fillna(df[column].mean())  # replace with mean
+            else:
+                df_clean[column] = df[column]
+
+        # remove processed column to save memory
+        del df[column]
+
+    df_training = df_clean[0:len(cars_training)]
+    df_prediction = df_clean[len(cars_training):]
 
     columns_training = df_training.columns[1:]
     # print('included: %s' % columns_training)
@@ -61,11 +84,12 @@ def train_and_predict(cars_training: list, cars_prediction: list):
     # X = scaler.fit_transform(X.todense())
 
     # regr = SVR(kernel='linear')  # 0.80
-    regr = DecisionTreeRegressor(criterion='mae', min_samples_leaf=25, min_impurity_split=1000)
+    print('training')
+    regr = DecisionTreeRegressor(criterion='mae', min_samples_leaf=0.1, min_impurity_split=1000)
     regr.fit(X, y)
 
-    scores = cross_val_score(regr, X, y, cv=5)
     print("R² on training set:", regr.score(X, y))
+    scores = cross_val_score(regr, X, y)
     print("Cross-validated Accuracy: %0.4f (+/- %0.4f)" % (scores.mean(), scores.std() * 2))
 
     # generate_tree_visualization(regr, X.columns)
@@ -78,6 +102,7 @@ def train_and_predict(cars_training: list, cars_prediction: list):
 def preprocess(cars):
     df = pandas.DataFrame()
 
+    # already pre-processed columns
     df['id'] = pandas.Series([car['mobile']['ad_id'] for car in cars])
     df['price'] = pandas.Series([float(car['mobile']['dart']['ad']['price']) for car in cars])
     df['first_reg_year'] = pandas.Series([float(car['mobile']['dart']['adFirstRegYear']) for car in cars])
@@ -88,15 +113,10 @@ def preprocess(cars):
     df['cc'] = pandas.Series([get_cc(car) for car in cars])
     df['prev_owners'] = pandas.Series([get_prev_owners(car) for car in cars])
 
-    # add fuel, make it binary, drop fuel
-    # todo make repeatable
+    # special columns
     df['fuel'] = pandas.Series([car['mobile']['dart'].get('adSpecificsFuel', None) for car in cars])
-    fuel_dummies = pandas.get_dummies(df['fuel'])
-    df = pandas.concat([df, fuel_dummies], axis=1)
-    df = df.drop('fuel', axis=1)
 
     # features
-    # todo make repeatable
     features = set()
     for car in cars:
         if car['mobile']['web']['features'] is not None:
@@ -106,31 +126,23 @@ def preprocess(cars):
         values = []
         for car in cars:
             value = car['mobile']['web']['features'] is not None and feature_name in car['mobile']['web']['features']
-            values.append(value)
+            values.append(float(value))
 
-        df[feature_name] = pandas.Series(values)
+        df['feature_' + feature_name] = pandas.Series(values)
 
     # tech details as strings
-    # todo make repeatable
-    included_keys = ['interior', 'emissionClass', 'climatisation', 'countryVersion', 'damageCondition', 'export', 'transmission']
     technical = pandas.DataFrame([car['mobile']['web']['technical'] for car in cars])
-    # print('excluded from technical: %s' % technical.columns)
+    included_keys = ['interior', 'emissionClass', 'climatisation', 'countryVersion', 'damageCondition', 'export', 'transmission']
     selected_keys = [column for column in included_keys if column in list(technical.columns.values)]  # avoid columns not seen in sample
     technical = technical[selected_keys]
     # extract interior
     technical['interior_type'] = technical.apply(lambda row: extract_interior_type(row['interior']) if row['interior'] is not numpy.NaN else 'unknown', axis=1)
     technical['interior_color'] = technical.apply(lambda row: extract_interior_color(row['interior']) if row['interior'] is not numpy.NaN else 'unknown', axis=1)
     del technical['interior']
-    technical_clean = get_dummies_for_all(technical)
-    df = pandas.concat([df, technical_clean], axis=1)
+    df = pandas.concat([df, technical], axis=1)
 
     # add data from dart
-    values = []
-    keys_from_dart = ['adSpecificsMake', 'adSpecificsMakeModel', 'adSpecificsModel']
-    for car in cars:
-        values.append([car['mobile']['dart'][key_from_dart] for key_from_dart in keys_from_dart])
-    dart = pandas.DataFrame(values)
-    df = pandas.concat([df, get_dummies_for_all(dart)], axis=1)
+    # df['maker'] = pandas.Series([car['mobile']['dart']['adSpecificsMake'] for car in cars])
 
     # money_words = get_money_words(cars, df)
     # df = pandas.concat([df, money_words], axis=1)
@@ -183,7 +195,10 @@ def load_cars(sample=None):
         with open(directory + '/' + filename) as file:
             json_string = file.read()
         car = json.loads(json_string)
-        cars.append(car)
+        if 'price' in car['mobile']['dart']['ad']:
+            cars.append(car)
+        else:
+            logging.warning('car without price: %s' % car)
 
         if sample is not None and len(cars) >= sample:
             return cars
@@ -232,7 +247,7 @@ def get_car_age_in_years(car):
 
 
 def get_time_to_hu(car):
-    time_to_hu = -5
+    time_to_hu = numpy.NaN
     if 'hu' in car['mobile']['web']['technical']:
         hu_raw = car['mobile']['web']['technical']['hu']
         if hu_raw == 'Neu':
@@ -245,7 +260,7 @@ def get_time_to_hu(car):
 
 
 def get_ps(car):
-    power_in_ps = -1
+    power_in_ps = numpy.NaN
     if 'power' in car['mobile']['web']['technical']:
         power_raw = car['mobile']['web']['technical']['power']
         power_in_ps = int(re.findall(r'\d+', power_raw)[1])
@@ -253,7 +268,7 @@ def get_ps(car):
 
 
 def get_prev_owners(car):
-    owners = -10
+    owners = numpy.NaN
     if 'numberOfPreviousOwners' in car['mobile']['web']['technical']:
         owners = int(car['mobile']['web']['technical']['numberOfPreviousOwners'])
     return owners
@@ -264,7 +279,7 @@ def get_cc(car):
         cubic_capacity_raw = car['mobile']['web']['technical']['cubicCapacity'].replace('.', '')
         cubic_capacity = int(re.findall(r'\d+', cubic_capacity_raw)[0])
         return cubic_capacity
-    return -1
+    return numpy.NaN
 
 
 def generate_tree_visualization(regr, feature_names):
