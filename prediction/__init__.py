@@ -1,10 +1,10 @@
 import json
+import logging
 import os
 import re
 from datetime import datetime
 from time import sleep
 
-import logging
 import numpy
 import pandas
 import requests
@@ -13,90 +13,20 @@ from graphviz import Source
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_selection import SelectKBest
 from sklearn.feature_selection import mutual_info_regression
-from sklearn.model_selection import cross_val_score
-from sklearn.tree import DecisionTreeRegressor
+
+from prediction.predictor import Predictor
 
 SECONDS_TO_YEARS_FACTOR = 1 / (60 * 60 * 24 * 365)
 
 
 def main():
-    while True:
-        cars = load_cars()[:10000]
-        predictions = train_and_predict(cars, cars)
-        print_best_predictions(predictions, n=100, ensure_online=True)
-        sleep(300)
+    # start = datetime.now()
+    cars = load_cars()
+    predictor = Predictor()
+    predictor.train(cars)
 
-
-def print_best_predictions(predictions, n=100, ensure_online=False):
-    best_predictions = sorted(predictions, key=lambda p: p['price']['difference'])
-    shown = 0
-    for prediction in best_predictions:
-        sleep(0.5)
-        url = 'https://suchen.mobile.de/fahrzeuge/details.html?id=%s' % prediction['car_id']
-        if not ensure_online or requests.get(url).status_code == 200:
-            shown += 1
-            print(url)
-            print('listed with:  %d' % prediction['price']['actual'])
-            print('worth around: %d' % prediction['price']['inferred'])
-            print('difference:   %d' % prediction['price']['difference'])
-
-        if shown >= n:
-            return
-
-
-def train_and_predict(cars_training: list, cars_prediction: list):
-    cars = cars_training + cars_prediction
-    df = preprocess(cars)
-    print(df)
-
-    df_clean = pandas.DataFrame()
-    for column in list(df.columns.values):
-        print(column)
-        if df[column].dtype not in [numpy.float64, numpy.int]:
-            # create dummies and concat
-            dummies = pandas.get_dummies(df[column], prefix=column, dummy_na=True)
-            df_clean = pandas.concat([df_clean, dummies], axis=1)
-            print('  getting dummies (%d columns)' % len(list(dummies.columns)))
-        else:
-            print('  appending')
-            # copy column
-            if df[column].isnull().any():
-                # nan_replacement = nan_replacements[column]
-                df_clean[column] = df[column].fillna(df[column].mean())  # replace with mean
-            else:
-                df_clean[column] = df[column]
-
-        # remove processed column to save memory
-        del df[column]
-
-    df_training = df_clean[0:len(cars_training)]
-    df_prediction = df_clean[len(cars_training):]
-
-    columns_training = df_training.columns[1:]
-    # print('included: %s' % columns_training)
-    excluded = [column for column in list(df_training.columns) if column not in columns_training]
-    # print('excluded: %s' % excluded)
-
-    X = df_training[columns_training]
-    y = df_training['price']
-
-    # scaler = StandardScaler()
-    # X = scaler.fit_transform(X.todense())
-
-    # regr = SVR(kernel='linear')  # 0.80
-    print('training')
-    regr = DecisionTreeRegressor(criterion='mae', min_samples_leaf=0.1, min_impurity_split=1000)
-    regr.fit(X, y)
-
-    print("R² on training set:", regr.score(X, y))
-    scores = cross_val_score(regr, X, y)
-    print("Cross-validated Accuracy: %0.4f (+/- %0.4f)" % (scores.mean(), scores.std() * 2))
-
-    # generate_tree_visualization(regr, X.columns)
-
-    predictions = generate_predictions(df_prediction, regr, columns_training)
-
-    return predictions
+    predictions = predictor.predict(load_cars())
+    print_best_predictions(predictions, n=500, ensure_online=True)
 
 
 def preprocess(cars):
@@ -152,6 +82,22 @@ def preprocess(cars):
 
     return df
 
+def print_best_predictions(predictions, n=100, ensure_online=False):
+    best_predictions = sorted(predictions, key=lambda p: p['price']['difference'])
+    shown = 0
+    for prediction in best_predictions:
+        sleep(0.5)
+        url = 'https://suchen.mobile.de/fahrzeuge/details.html?id=%s' % prediction['car_id']
+        if not ensure_online or requests.get(url).status_code == 200:
+            shown += 1
+            print(url)
+            print('listed with:  %d' % prediction['price']['actual'])
+            print('worth around: %d' % prediction['price']['inferred'])
+            print('difference:   %d' % prediction['price']['difference'])
+
+        if shown >= n:
+            return
+
 
 def get_dummies_for_all(dataframe):
     return pandas.concat([pandas.get_dummies(dataframe[col]) for col in dataframe], axis=1, keys=dataframe.columns)
@@ -187,7 +133,7 @@ def extract_interior_color(desc):
     return numpy.NaN
 
 
-def load_cars(sample=None):
+def load_cars(sample=None, after=None):
     cars = []
     directory = os.getcwd() + '/cars'
     file_list = os.listdir(directory)
@@ -195,38 +141,16 @@ def load_cars(sample=None):
         with open(directory + '/' + filename) as file:
             json_string = file.read()
         car = json.loads(json_string)
+
         if 'price' in car['mobile']['dart']['ad']:
-            cars.append(car)
+            if after is None or car['crawler']['first_seen_at'] > after:
+                cars.append(car)
         else:
             logging.warning('car without price: %s' % car)
 
         if sample is not None and len(cars) >= sample:
             return cars
     return cars
-
-
-def generate_predictions(df, regr, features_training):
-    predictions = []
-    for index, row in df.iterrows():
-        car_row = numpy.asarray(row[features_training])
-
-        price_actual = df.ix[index].price
-        price_inferred = int(regr.predict(numpy.asarray([car_row])))
-
-        difference = price_actual - price_inferred
-        is_cheap = difference < 0
-
-        prediction = {
-            'price': {
-                'actual': price_actual,
-                'inferred': price_inferred,
-                'difference': difference,
-                'is_cheap': is_cheap,
-            },
-            'car_id': index,
-        }
-        predictions.append(prediction)
-    return predictions
 
 
 def extract_price(car):
