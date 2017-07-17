@@ -14,6 +14,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_selection import SelectKBest
 from sklearn.feature_selection import mutual_info_regression
 
+import scraping
 from prediction.predictor import Predictor
 
 SECONDS_TO_YEARS_FACTOR = 1 / (60 * 60 * 24 * 365)
@@ -23,9 +24,10 @@ def main():
     # start = datetime.now()
     cars = load_cars()
     predictor = Predictor()
-    predictor.train(cars)
+    predictor.train(cars, cross_validate=False)
 
-    predictions = predictor.predict(load_cars())
+    new_cars = scraping.scrape_search(scraping.USED_PRIVATE_PREMIUM_CARS)
+    predictions = predictor.predict(new_cars)
     print_best_predictions(predictions, n=500, ensure_online=True)
 
 
@@ -34,14 +36,16 @@ def preprocess(cars):
 
     # already pre-processed columns
     df['id'] = pandas.Series([car['mobile']['ad_id'] for car in cars])
-    df['price'] = pandas.Series([float(car['mobile']['dart']['ad']['price']) for car in cars])
+    df['price'] = pandas.Series([int(car['mobile']['dart']['ad']['price']) for car in cars], dtype=int)
     df['first_reg_year'] = pandas.Series([float(car['mobile']['dart']['adFirstRegYear']) for car in cars])
     df['mileage_in_km'] = pandas.Series([float(extract_number_from_string(car['mobile']['web']['technical']['mileage'])) for car in cars])
     df['car_age'] = pandas.Series([get_car_age_in_years(car) for car in cars])
+    df['km_per_year'] = df[['mileage_in_km', 'car_age']].apply(lambda x: x[0] / x[1], axis=1)
     df['time_to_hu'] = pandas.Series([get_time_to_hu(car) for car in cars])
     df['ps'] = pandas.Series([get_ps(car) for car in cars])
     df['cc'] = pandas.Series([get_cc(car) for car in cars])
     df['prev_owners'] = pandas.Series([get_prev_owners(car) for car in cars])
+    df['ps_per_cc'] = pandas.Series([get_ps(car) / get_cc(car) for car in cars])
 
     # special columns
     df['fuel'] = pandas.Series([car['mobile']['dart'].get('adSpecificsFuel', None) for car in cars])
@@ -81,6 +85,7 @@ def preprocess(cars):
     df = df.set_index('id')
 
     return df
+
 
 def print_best_predictions(predictions, n=100, ensure_online=False):
     best_predictions = sorted(predictions, key=lambda p: p['price']['difference'])

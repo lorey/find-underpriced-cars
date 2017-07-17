@@ -141,6 +141,10 @@ def scrape_ad(url):
     # dart data
     car['mobile']['dart'] = extract_dart_data(html)
 
+    if car['mobile']['dart']['ad']['price'] is None:
+        logging.warning('price is not set: %s' % url)
+        return None
+
     # add url
     car['url'] = url
 

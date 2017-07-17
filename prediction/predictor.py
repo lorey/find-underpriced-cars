@@ -1,3 +1,4 @@
+import logging
 import numpy
 import pandas
 from sklearn.model_selection import cross_val_score
@@ -14,6 +15,10 @@ class Predictor(object):
         df = prediction.preprocess(cars)
         df = self.prepare(df)
 
+        # remove duplicate ids
+        # todo find out why there are duplicates: duplicate results?
+        df = df.groupby(level=0).last()
+
         # use trained columns and adapt it to current data frame
         df_adapted = pandas.DataFrame()
         for column in self.columns:
@@ -29,26 +34,37 @@ class Predictor(object):
         predictions = []
         for index, row in df_adapted.iterrows():
             car_row = numpy.asarray(row[self.columns])
+            # print(car_row)
 
-            price_actual = df.ix[index].price
-            price_inferred = int(self.regressor.predict(numpy.asarray([car_row])))
+            try:
+                price_inferred = int(self.regressor.predict(numpy.asarray([car_row])))
+                price_actual = df.ix[index].price
+                difference = price_actual - price_inferred
+                is_cheap = difference < 0
 
-            difference = price_actual - price_inferred
-            is_cheap = difference < 0
+                price_prediction = {
+                    'price': {
+                        'actual': int(price_actual),
+                        'inferred': int(price_inferred),
+                        'difference': int(difference),
+                        'is_cheap': is_cheap,
+                    },
+                    'car_id': index,
+                }
+                predictions.append(price_prediction)
+            except:
+                logging.exception('price inferring went wrong')
+                print(df.ix[index].price)
+                print(type(df.ix[index].price))
+                # id
+                # 247503007    9600
+                # 247503007    9600
+                # Name: price, dtype: int64
+                # <class 'pandas.core.series.Series'>
 
-            price_prediction = {
-                'price': {
-                    'actual': price_actual,
-                    'inferred': price_inferred,
-                    'difference': difference,
-                    'is_cheap': is_cheap,
-                },
-                'car_id': index,
-            }
-            predictions.append(price_prediction)
         return predictions
 
-    def train(self, cars):
+    def train(self, cars, cross_validate=True):
         df = prediction.preprocess(cars)
         df_clean = self.prepare(df)
 
@@ -61,12 +77,17 @@ class Predictor(object):
         y = df_clean['price']
 
         print('training')
-        self.regressor = DecisionTreeRegressor(criterion='mae', min_samples_leaf=0.01, min_impurity_split=1000)
+        # self.regressor = DecisionTreeRegressor(criterion='mae', min_samples_leaf=100, min_impurity_split=1000)  # 86%
+        # self.regressor = DecisionTreeRegressor(criterion='mae', min_samples_leaf=50, min_impurity_split=750)  # 87%
+        self.regressor = DecisionTreeRegressor(criterion='mae', min_samples_leaf=50)  # 87%
         self.regressor.fit(X, y)
 
         print("R² on training set:", self.regressor.score(X, y))
-        scores = cross_val_score(self.regressor, X, y)
-        print("Cross-validated Accuracy: %0.4f (+/- %0.4f)" % (scores.mean(), scores.std() * 2))
+        if cross_validate:
+            scores = cross_val_score(self.regressor, X, y)
+            print("Cross-validated Accuracy: %0.4f (+/- %0.4f)" % (scores.mean(), scores.std() * 2))
+        else:
+            logging.info('Skipping cross validation')
 
         # generate_tree_visualization(regr, X.columns)
 
