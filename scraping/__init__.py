@@ -17,7 +17,7 @@ USED_CARS = {
     'sortOption.sortBy': 'creationTime',
     'sortOption.sortOrder': 'DESCENDING',
     'maxMileage': 200000,
-     'maxPrice': 25000,
+    'maxPrice': 25000,
 }
 
 USED_PRIVATE_PREMIUM_CARS = {
@@ -54,7 +54,11 @@ PARAMETERS_BMW_ONE_SERIES = {
 
 def run():
     while True:
-        scrape_search(parameters=USED_CARS)
+        try:
+            scrape_search(parameters=USED_CARS)
+        except:
+            logging.exception('searching failed')
+            sleep(60)
 
         # fuck sleep
         # print('going to sleep')
@@ -141,7 +145,7 @@ def scrape_ad(url):
     # dart data
     car['mobile']['dart'] = extract_dart_data(html)
 
-    if car['mobile']['dart']['ad']['price'] is None:
+    if 'price' not in car['mobile']['dart']['ad']:
         logging.warning('price is not set: %s' % url)
         return None
 
