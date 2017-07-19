@@ -1,8 +1,5 @@
-import json
 import logging
-import os
 import urllib
-from datetime import datetime
 from time import sleep
 
 import requests
@@ -10,6 +7,10 @@ from bs4 import BeautifulSoup
 
 import storage
 from scraping import extraction
+
+LIMIT_MILEAGE = 200000
+
+LIMIT_PRICE = 25000
 
 RETRIES_ON_FAILURE = 3
 
@@ -21,8 +22,8 @@ USED_CARS = {
      'usage': 'USED',
     'sortOption.sortBy': 'creationTime',
     'sortOption.sortOrder': 'DESCENDING',
-    'maxMileage': 200000,
-    'maxPrice': 25000,
+    'maxMileage': LIMIT_MILEAGE,
+    'maxPrice': LIMIT_PRICE,
 }
 
 USED_PRIVATE_PREMIUM_CARS = {
@@ -38,29 +39,21 @@ USED_PRIVATE_PREMIUM_CARS = {
     'usage': 'USED',
     'sortOption.sortBy': 'creationTime',
     'sortOption.sortOrder': 'DESCENDING',
-    'maxMileage': 200000,
-    'maxPrice': 25000,
+    'maxMileage': LIMIT_MILEAGE,
+    'maxPrice': LIMIT_PRICE,
 }
 
-PARAMETERS_BMW_ONE_SERIES = {
-    'ambitCountry': 'DE',
-    'damageUnrepaired': 'NO_DAMAGE_UNREPAIRED',
-    'isSearchRequest': 'true',
-    'makeModelVariant1.makeId': 3500,  # bmw
-    'makeModelVariant1.modelGroupId': 20,  # 1 series
-    'makeModelVariant1.modelId': '73%2C2%2C3%2C4%2C59%2C61%2C5%2C58%2C87',  # combination of models?
-    'scopeId': 'C',
-    'usage': 'USED',
-    'sortOption.sortBy': 'creationTime',
-    'sortOption.sortOrder': 'DESCENDING',
-    'maxPrice': 10000,
-}
+PARAMETERS_TO_SCRAPE = [
+    USED_CARS,
+    USED_PRIVATE_PREMIUM_CARS,
+]
 
 
 def run():
     while True:
-        scrape_search(parameters=USED_CARS)
-
+        for parameters in PARAMETERS_TO_SCRAPE:
+            scrape_search(parameters)
+        sleep(60)
         # fuck sleep
         # print('going to sleep')
         # sleep(60 * 5)
@@ -71,35 +64,53 @@ def scrape_search(parameters, pages=50):
         logging.warning('pages bigger than 50 do not yield new results')
 
     cars_data = []
-
     for page in range(1, 1 + pages):
-        search_url = 'https://suchen.mobile.de/fahrzeuge/search.html'
-        parameters['pageNumber'] = page
-        url = search_url + '?' + urllib.parse.urlencode(parameters)
-        print(url)
+        cars_in_results = scrape_search_results(page, parameters)
+        cars_data.extend(cars_in_results)
 
-        session = requests.session()
-        response = session.get(url)
-        html = response.content.decode('utf-8')
-        soup = BeautifulSoup(html, 'html.parser')
+    return cars_data
 
-        car_results = soup.find_all('div', {'class': 'cBox-body--resultitem'})
 
-        # return if finished early
-        if len(car_results) == 0:
-            return cars_data
+def scrape_search_results(page, parameters):
+    search_url = 'https://suchen.mobile.de/fahrzeuge/search.html'
+    parameters['pageNumber'] = page
+    url = search_url + '?' + urllib.parse.urlencode(parameters)
+    print(url)
 
-        sleep(3)
-        for car_result in car_results:
-            car_link = car_result.a
-            if car_link.has_attr('data-ad-id'):
-                ad_id = int(car_result.a['data-ad-id'])
+    sleep(3)
+    session = requests.session()
+    response = session.get(url)
+
+    html = response.content.decode('utf-8')
+    soup = BeautifulSoup(html, 'html.parser')
+
+    car_results = soup.find_all('div', {'class': 'cBox-body--resultitem'})
+
+    cars_data = []
+    for car_result in car_results:
+        car_link = car_result.a
+        if car_link.has_attr('data-ad-id'):
+            ad_id = int(car_result.a['data-ad-id'])
+            print(get_ad_url(ad_id))
+
+            car_data = None
+
+            # fetch from storage
+            if storage.is_stored(ad_id):
+                print('  found in storage')
+                html = storage.load_ad(ad_id)
+                car_data = extract_data_from_ad(html, get_ad_url(ad_id))
+
+            # if storage is corrupt or non-existent
+            if car_data is None:
+                print('  scraping')
+                sleep(3)  # sleep to keep footprint low
                 car_data = scrape_ad(ad_id, session)
 
-                if car_data is not None:
-                    cars_data.append(car_data)
-            else:
-                logging.warning('no ad-id: %s' % car_result)
+            if car_data is not None:
+                cars_data.append(car_data)
+        else:
+            logging.warning('no ad-id: %s' % car_result)
 
     return cars_data
 
@@ -110,9 +121,7 @@ def scrape_ad(ad_id, session=None):
 
     # todo save pictures
 
-    url = 'https://suchen.mobile.de/fahrzeuge/details.html?id=%d' % ad_id
-    print(url)
-
+    url = get_ad_url(ad_id)
     response = session.get(url)
     if response.status_code != 200:
         logging.warning('status code is %d for %s' % (response.status_code, url))
@@ -121,15 +130,22 @@ def scrape_ad(ad_id, session=None):
     html = response.content.decode('utf-8')
     storage.save_ad(ad_id, html)
 
+    return extract_data_from_ad(html, url)
+
+
+def get_ad_url(ad_id):
+    url = 'https://suchen.mobile.de/fahrzeuge/details.html?id=%d' % ad_id
+    return url
+
+
+def extract_data_from_ad(html, url):
     extractor = extraction.AdExtractor(html)
     car = extractor.get_data()
-
     if car is None:
         return None
 
     # add url
     car['url'] = url
-
     return car
 
 

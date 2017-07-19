@@ -16,8 +16,10 @@ def save_ad(ad_id, html):
 
 
 def load_ad(ad_id):
-    s3_object = _get_bucket().get_object(Key=_get_ad_key(ad_id))
-    return s3_object["Body"].read()
+    s3_object = boto3.resource('s3').Object(config.S3_BUCKET_NAME, _get_ad_key(ad_id))
+    ad_html_bytes = s3_object.get()["Body"].read()
+    ad_html = ad_html_bytes.decode('utf-8')
+    return ad_html
 
 
 def is_stored(ad_id):
