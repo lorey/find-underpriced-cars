@@ -19,7 +19,7 @@ USED_CARS = {
     'damageUnrepaired': 'NO_DAMAGE_UNREPAIRED',
     'isSearchRequest': 'true',
     'scopeId': 'C',
-     'usage': 'USED',
+    'usage': 'USED',
     'sortOption.sortBy': 'creationTime',
     'sortOption.sortOrder': 'DESCENDING',
     'maxMileage': LIMIT_MILEAGE,
@@ -50,28 +50,30 @@ PARAMETERS_TO_SCRAPE = [
 
 
 def run():
+    ad_ids = set()
     while True:
         for parameters in PARAMETERS_TO_SCRAPE:
-            scrape_search(parameters)
-        sleep(60)
-        # fuck sleep
-        # print('going to sleep')
-        # sleep(60 * 5)
+            scrape_search(parameters, ad_ids=ad_ids)
+
+        if len(ad_ids) > 10000:
+            # reset if too big
+            ad_ids = set()
+            print('resetting cached ids')
 
 
-def scrape_search(parameters, pages=50):
+def scrape_search(parameters, pages=50, ad_ids=set()):
     if pages > 50:
         logging.warning('pages bigger than 50 do not yield new results')
 
     cars_data = []
     for page in range(1, 1 + pages):
-        cars_in_results = scrape_search_results(page, parameters)
+        cars_in_results = scrape_search_results(page, parameters, ad_ids)
         cars_data.extend(cars_in_results)
 
     return cars_data
 
 
-def scrape_search_results(page, parameters):
+def scrape_search_results(page, parameters, ad_ids):
     search_url = 'https://suchen.mobile.de/fahrzeuge/search.html'
     parameters['pageNumber'] = page
     url = search_url + '?' + urllib.parse.urlencode(parameters)
@@ -93,22 +95,28 @@ def scrape_search_results(page, parameters):
             ad_id = int(car_result.a['data-ad-id'])
             print(get_ad_url(ad_id))
 
-            car_data = None
+            if ad_id in ad_ids:
+                # already scraped and parsed
+                print('  skip')
+            else:
+                # scrape again
+                car_data = None
 
-            # fetch from storage
-            if storage.is_stored(ad_id):
-                print('  found in storage')
-                html = storage.load_ad(ad_id)
-                car_data = extract_data_from_ad(html, get_ad_url(ad_id))
+                # fetch from storage
+                if storage.is_stored(ad_id):
+                    print('  found in storage')
+                    html = storage.load_ad(ad_id)
+                    car_data = extract_data_from_ad(html, get_ad_url(ad_id))
 
-            # if storage is corrupt or non-existent
-            if car_data is None:
-                print('  scraping')
-                sleep(3)  # sleep to keep footprint low
-                car_data = scrape_ad(ad_id, session)
+                # if storage is corrupt or non-existent
+                if car_data is None:
+                    print('  scraping')
+                    sleep(3)  # sleep to keep footprint low
+                    car_data = scrape_ad(ad_id, session)
 
-            if car_data is not None:
-                cars_data.append(car_data)
+                if car_data is not None:
+                    ad_ids.add(ad_id)
+                    cars_data.append(car_data)
         else:
             logging.warning('no ad-id: %s' % car_result)
 
