@@ -26,7 +26,7 @@ def main():
     predictor = Predictor()
     predictor.train(cars, cross_validate=False)
 
-    new_cars = scraping.scrape_search(scraping.USED_PRIVATE_PREMIUM_CARS)
+    new_cars = scraping.scrape_search(scraping.SEARCH_PREDICTION)
     predictions = predictor.predict(new_cars)
     print_best_predictions(predictions, n=500, ensure_online=True)
 
@@ -46,6 +46,9 @@ def preprocess(cars):
     df['cc'] = pandas.Series([get_cc(car) for car in cars])
     df['prev_owners'] = pandas.Series([get_prev_owners(car) for car in cars])
     df['ps_per_cc'] = pandas.Series([get_ps(car) / get_cc(car) for car in cars])
+
+    # df['maker'] = pandas.Series([car['mobile']['dart']['adSpecificsMake'] for car in cars])
+    # df['model'] = pandas.Series([car['mobile']['dart']['adSpecificsModel'] for car in cars])
 
     # special columns
     df['fuel'] = pandas.Series([car['mobile']['dart'].get('adSpecificsFuel', None) for car in cars])
@@ -81,6 +84,12 @@ def preprocess(cars):
     # money_words = get_money_words(cars, df)
     # df = pandas.concat([df, money_words], axis=1)
 
+    # todo rechtslenker
+    df['is_rechtslenker'] = pandas.Series(['rechtslenker' in text for text in get_texts_from_cars(cars)], dtype=int)
+
+    # todo gas / lpg
+    df['is_lpg'] = pandas.Series(['lpg' in text for text in get_texts_from_cars(cars)], dtype=int)
+
     # key by id
     df = df.set_index('id')
 
@@ -109,12 +118,7 @@ def get_dummies_for_all(dataframe):
 
 
 def get_money_words(cars, df, top=10):
-    texts = []
-    for car in cars:
-        if car['mobile']['web']['description'] is not None:
-            texts.append(car['mobile']['web']['description'].get('text', ''))
-        else:
-            texts.append('')
+    texts = get_texts_from_cars(cars)
 
     tfidf_vectorizer = TfidfVectorizer(ngram_range=(2, 5), max_features=top*10, max_df=0.75)
     tfidfs = tfidf_vectorizer.fit_transform(texts)
@@ -125,6 +129,16 @@ def get_money_words(cars, df, top=10):
     k_best_feature_indices = k_best.get_support(True).tolist()
     k_best_column_names = ['contains=' + tfidf_vectorizer.get_feature_names()[i] for i in k_best_feature_indices]
     return pandas.DataFrame(X_new.todense(), columns=k_best_column_names)
+
+
+def get_texts_from_cars(cars):
+    texts = []
+    for car in cars:
+        if car['mobile']['web']['description'] is not None:
+            texts.append(car['mobile']['web']['description'].get('text', ''))
+        else:
+            texts.append('')
+    return texts
 
 
 def extract_interior_type(desc):
@@ -147,11 +161,11 @@ def load_cars(sample=None, after=None):
             json_string = file.read()
         car = json.loads(json_string)
 
-        if 'price' in car['mobile']['dart']['ad']:
+        if 'price' in car['mobile']['dart']['ad'] and 'adFirstRegYear' in car['mobile']['dart']:
             if after is None or car['crawler']['first_seen_at'] > after:
                 cars.append(car)
         else:
-            logging.warning('car without price: %s' % car)
+            logging.warning('car without dart features: %s' % car['mobile']['dart'])
 
         if sample is not None and len(cars) >= sample:
             return cars

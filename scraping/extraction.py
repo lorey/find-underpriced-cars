@@ -17,6 +17,10 @@ class AdExtractor(object):
         # dart data
         car['mobile']['dart'] = self.extract_dart_data()
 
+        if car['mobile']['dart'] is None:
+            logging.warning('no dart data')
+            return None
+
         if 'price' not in car['mobile']['dart']['ad']:
             logging.warning('price is not set')
             return None
@@ -26,11 +30,26 @@ class AdExtractor(object):
     def extract_dart_data(self):
         html = self.html
 
+        # ad data start and end strings
         search_start = 'mobile.dart.setAdData('
-        start_index = html.find(search_start) + len(search_start)
-        end_index = html.find(');', start_index)
+        search_end = ');\n'
 
-        json_data = json.loads(html[start_index:end_index])
+        # find start and end
+        search_start_index = html.find(search_start)
+        if search_start_index == -1:
+            logging.warning('ad data start not found')
+            return None  # empty dict as default value
+
+        start_index = search_start_index + len(search_start)
+        end_index = html.find(search_end, start_index)
+
+        # try to extract json
+        json_string = html[start_index:end_index]
+        try:
+            json_data = json.loads(json_string)
+        except ValueError as ve:
+            # most likely the json contains the end indicator
+            raise RuntimeError('malformed json: %s' % json_string) from ve
         return json_data
 
     def scrape_data_from_ad_page(self):

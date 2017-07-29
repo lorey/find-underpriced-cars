@@ -89,8 +89,6 @@ class Predictor(object):
         else:
             logging.info('Skipping cross validation')
 
-        # generate_tree_visualization(regr, X.columns)
-
     def prepare(self, df):
         df_clean = pandas.DataFrame()
         for column in list(df.columns.values):

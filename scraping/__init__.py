@@ -1,5 +1,6 @@
 import logging
 import urllib
+from datetime import datetime
 from time import sleep
 
 import requests
@@ -8,11 +9,13 @@ from bs4 import BeautifulSoup
 import storage
 from scraping import extraction
 
-LIMIT_MILEAGE = 200000
+MAX_AGE_IN_MINUTES = 6 * 60
 
-LIMIT_PRICE = 25000
+RESET_IDS_INTERVAL = 10000
 
-RETRIES_ON_FAILURE = 3
+SLEEP_BEFORE_AD = 1
+
+SLEEP_BEFORE_RESULTS_PAGE = 5
 
 USED_CARS = {
     'ambitCountry': 'DE',
@@ -22,8 +25,6 @@ USED_CARS = {
     'usage': 'USED',
     'sortOption.sortBy': 'creationTime',
     'sortOption.sortOrder': 'DESCENDING',
-    'maxMileage': LIMIT_MILEAGE,
-    'maxPrice': LIMIT_PRICE,
 }
 
 USED_PRIVATE_PREMIUM_CARS = {
@@ -39,8 +40,25 @@ USED_PRIVATE_PREMIUM_CARS = {
     'usage': 'USED',
     'sortOption.sortBy': 'creationTime',
     'sortOption.sortOrder': 'DESCENDING',
-    'maxMileage': LIMIT_MILEAGE,
-    'maxPrice': LIMIT_PRICE,
+}
+
+SEARCH_PREDICTION = {
+    'ft': 'PETROL',
+    'features': 'XENON_HEADLIGHTS',
+    'adLimitation': 'ONLY_FSBO_ADS',  # private
+    'climatisation': 'MANUAL_OR_AUTOMATIC_CLIMATISATION',
+    'ambitCountry': 'DE',
+    'damageUnrepaired': 'NO_DAMAGE_UNREPAIRED',
+    'isSearchRequest': 'true',
+    'makeModelVariant1.makeId': 3500,  # bmw
+    'makeModelVariant2.makeId': 1900,  # audi?
+    'makeModelVariant3.makeId': 17200,  # mercedes?
+    'scopeId': 'C',
+    'usage': 'USED',
+    'sortOption.sortBy': 'creationTime',
+    'sortOption.sortOrder': 'DESCENDING',
+    'maxPrice': 5000,
+    'maxMileage': 250000,
 }
 
 PARAMETERS_TO_SCRAPE = [
@@ -50,20 +68,23 @@ PARAMETERS_TO_SCRAPE = [
 
 
 def run():
-    ad_ids = set()
+    ad_ids = {}
     while True:
         for parameters in PARAMETERS_TO_SCRAPE:
             scrape_search(parameters, ad_ids=ad_ids)
 
-        if len(ad_ids) > 10000:
+        if len(ad_ids) > 100000:
             # reset if too big
             ad_ids = set()
             print('resetting cached ids')
 
 
-def scrape_search(parameters, pages=50, ad_ids=set()):
+def scrape_search(parameters, pages=50, ad_ids=None):
     if pages > 50:
         logging.warning('pages bigger than 50 do not yield new results')
+
+    if ad_ids is None:
+        ad_ids = {}
 
     cars_data = []
     for page in range(1, 1 + pages):
@@ -79,7 +100,7 @@ def scrape_search_results(page, parameters, ad_ids):
     url = search_url + '?' + urllib.parse.urlencode(parameters)
     print(url)
 
-    sleep(3)
+    sleep(SLEEP_BEFORE_RESULTS_PAGE)
     session = requests.session()
     response = session.get(url)
 
@@ -95,10 +116,7 @@ def scrape_search_results(page, parameters, ad_ids):
             ad_id = int(car_result.a['data-ad-id'])
             print(get_ad_url(ad_id))
 
-            if ad_id in ad_ids:
-                # already scraped and parsed
-                print('  skip')
-            else:
+            if ad_id not in ad_ids:
                 # scrape again
                 car_data = None
 
@@ -111,11 +129,12 @@ def scrape_search_results(page, parameters, ad_ids):
                 # if storage is corrupt or non-existent
                 if car_data is None:
                     print('  scraping')
-                    sleep(3)  # sleep to keep footprint low
+                    sleep(SLEEP_BEFORE_AD)  # sleep to keep footprint low
                     car_data = scrape_ad(ad_id, session)
 
                 if car_data is not None:
-                    ad_ids.add(ad_id)
+                    print('  done')
+                    ad_ids[ad_id] = datetime.now()
                     cars_data.append(car_data)
         else:
             logging.warning('no ad-id: %s' % car_result)
